@@ -81,7 +81,7 @@ const Player = ({ urlParams, queryParams }) => {
     const [subtitlesMenuOpen, , closeSubtitlesMenu, toggleSubtitlesMenu] = useBinaryState(false);
     const [audioMenuOpen, , closeAudioMenu, toggleAudioMenu] = useBinaryState(false);
     const [speedMenuOpen, , closeSpeedMenu, toggleSpeedMenu] = useBinaryState(false);
-    const [statisticsMenuOpen, , closeStatisticsMenu, toggleStatisticsMenu] = useBinaryState(false);
+    const [statisticsMenuOpen, openStatisticsMenu, closeStatisticsMenu, toggleStatisticsMenu] = useBinaryState(false);
     const [nextVideoPopupOpen, openNextVideoPopup, closeNextVideoPopup] = useBinaryState(false);
     const [sideDrawerOpen, , closeSideDrawer, toggleSideDrawer] = useBinaryState(false);
 
@@ -132,6 +132,7 @@ const Player = ({ urlParams, queryParams }) => {
     const playbackSpeed = React.useRef(video.state.playbackSpeed || 1);
     const pressTimer = React.useRef(null);
     const longPress = React.useRef(false);
+    const activeHoldCode = React.useRef(null);
     const controlBarRef = React.useRef(null);
 
     const HOLD_DELAY = 400;
@@ -623,14 +624,6 @@ const Player = ({ urlParams, queryParams }) => {
         }
     }, [video.state.playbackSpeed, onPlaybackSpeedChanged], !menusOpen);
 
-    onShortcut('statisticsMenu', () => {
-        closeMenus();
-        const stream = player.selected?.stream;
-        if (streamingServer?.statistics?.type !== 'Err' && typeof stream?.infoHash === 'string' && typeof stream?.fileIdx === 'number') {
-            toggleStatisticsMenu();
-        }
-    }, [player.selected, streamingServer.statistics, toggleStatisticsMenu]);
-
     onShortcut('playNext', () => {
         closeMenus();
         if (window.playerNextVideo !== null) {
@@ -652,20 +645,44 @@ const Player = ({ urlParams, queryParams }) => {
             longPress.current = false;
         }
 
+        const isStatisticsEligible = () => {
+            const stream = player.selected?.stream;
+            return streamingServer?.statistics?.type !== 'Err'
+                && typeof stream?.infoHash === 'string'
+                && typeof stream?.fileIdx === 'number';
+        };
+
         const onKeyDown = (e) => {
-            if (e.code !== 'Space' || e.repeat) return;
-            if (menusOpen || e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
 
-            longPress.current = false;
+            if (e.code === 'Space') {
+                if (menusOpen) return;
 
-            pressTimer.current = setTimeout(() => {
-                longPress.current = true;
-                onPlaybackSpeedChanged(2, true);
-            }, HOLD_DELAY);
+                clearTimeout(pressTimer.current);
+                longPress.current = false;
+                activeHoldCode.current = 'Space';
+
+                pressTimer.current = setTimeout(() => {
+                    longPress.current = true;
+                    onPlaybackSpeedChanged(2, true);
+                }, HOLD_DELAY);
+            } else if (e.code === 'KeyD') {
+                clearTimeout(pressTimer.current);
+                longPress.current = false;
+                activeHoldCode.current = 'KeyD';
+
+                pressTimer.current = setTimeout(() => {
+                    longPress.current = true;
+                    if (isStatisticsEligible()) {
+                        closeMenus();
+                        openStatisticsMenu();
+                    }
+                }, HOLD_DELAY);
+            }
         };
 
         const onKeyUp = (e) => {
-            if (e.code !== 'Space' && e.code !== 'ArrowRight' && e.code !== 'ArrowLeft') return;
+            if (e.code !== 'Space' && e.code !== 'ArrowRight' && e.code !== 'ArrowLeft' && e.code !== 'KeyD') return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
 
             if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
@@ -686,6 +703,19 @@ const Player = ({ urlParams, queryParams }) => {
                     }
                 }
                 longPress.current = false;
+                activeHoldCode.current = null;
+            }
+            if (e.code === 'KeyD') {
+                clearTimeout(pressTimer.current);
+                pressTimer.current = null;
+                if (longPress.current) {
+                    closeStatisticsMenu();
+                } else if (isStatisticsEligible()) {
+                    closeMenus();
+                    toggleStatisticsMenu();
+                }
+                longPress.current = false;
+                activeHoldCode.current = null;
             }
         };
 
@@ -728,9 +758,14 @@ const Player = ({ urlParams, queryParams }) => {
             clearTimeout(pressTimer.current);
             pressTimer.current = null;
             if (longPress.current) {
-                onPlaybackSpeedChanged(playbackSpeed.current);
+                if (activeHoldCode.current === 'KeyD') {
+                    closeStatisticsMenu();
+                } else {
+                    onPlaybackSpeedChanged(playbackSpeed.current);
+                }
                 longPress.current = false;
             }
+            activeHoldCode.current = null;
             setSeeking(false);
         };
 
@@ -750,7 +785,7 @@ const Player = ({ urlParams, queryParams }) => {
             window.removeEventListener('mouseup', onMouseUp);
             window.removeEventListener('blur', onBlur);
         };
-    }, [routeFocused, menusOpen, video.state.volume, video.state.paused]);
+    }, [routeFocused, menusOpen, video.state.volume, video.state.paused, player.selected, streamingServer.statistics, openStatisticsMenu, closeStatisticsMenu, toggleStatisticsMenu, closeMenus]);
 
     React.useEffect(() => {
         video.events.on('error', onError);
